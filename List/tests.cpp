@@ -10,6 +10,29 @@
 using namespace fefu;
 
 TEST_CASE("TEST") {
+	SECTION("LOCK TEST") {
+		rw_lock lock;
+		int a = 10;
+		auto th1 = std::thread([&](int th) {
+			lock.wlock();
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			a = 15;
+			lock.unlock();
+			}, 0);
+
+		auto th2 = std::thread([&](int th) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			lock.rlock();
+			a = 5;
+			lock.unlock();
+			}, 0);
+
+		th1.join();
+		th2.join();
+
+		REQUIRE(a == 5);
+	}
+
 	SECTION("PUSH_BACK/INSERT/PUSH_FRONT") {
 		std::cout << "PUSH_BACK/INSERT/PUSH_FRONT" << std::endl;
 		List<int> list({ 1, 2, 3, 4 });
@@ -66,7 +89,7 @@ TEST_CASE("TEST") {
 		std::cout << "PUSH/ERASE TEST" << std::endl;
 		List<int> list;
 		std::vector<std::thread> threads;
-		int threadsAmount = 4;
+		int threadsAmount = 2;
 		int numberOfElements = 100;
 
 		for (int i = 0; i < numberOfElements * threadsAmount; ++i) {
@@ -104,7 +127,7 @@ TEST_CASE("TEST") {
 		}
 	}
 
-	SECTION("PUSH/ERASE MEDIUM GRAINED") {
+	SECTION("MULTIPLE PUSH/ERASE") {
 		std::cout << "MULTIPLE PUSH/ERASE TEST" << std::endl;
 		List<int> list;
 		int count = 0;
@@ -145,12 +168,14 @@ TEST_CASE("TEST") {
 
 		auto endThreaded = std::chrono::high_resolution_clock::now();
 		auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
-		std::cout << (double)timeThreaded.count() / 1000.0 << std::endl;
+
+		std::cout << "NUMBER OF THREADS = " << threadsAmount << std::endl;
+		std::cout << "TIME = " << (double)timeThreaded.count() / 1000.0 << std::endl;
 
 		REQUIRE(list.size() >= static_cast<size_t>(numberOfElements * threadsAmount));
 	}
 
-	SECTION("INSERT TEST") {
+	SECTION("INSERT/ITERATE TEST") {
 		std::cout << "INSERT/ITERATE TEST" << std::endl;
 		List<int> list;
 		int count = 0;
@@ -175,10 +200,6 @@ TEST_CASE("TEST") {
 				}, i));
 		}
 
-		auto endThreaded = std::chrono::high_resolution_clock::now();
-		auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
-		std::cout << (double)timeThreaded.count() / 1000.0 << std::endl;
-
 		for (int k = 0; k < threadsAmount * 2; ++k) {
 			threads[k].join();
 		}
@@ -198,66 +219,76 @@ TEST_CASE("TEST") {
 		for (int k = 0; k < threadsAmount; ++k) {
 			threads[k].join();
 		}
+
+		auto endThreaded = std::chrono::high_resolution_clock::now();
+		auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
+
+		std::cout << "NUMBER OF THREADS = " << threadsAmount << std::endl;
+		std::cout << "TIME = " << (double)timeThreaded.count() / 1000.0 << std::endl;
 	}
 
-	SECTION("SPEED TEST") {
-		std::cout << "SPEED TEST" << std::endl;
-		for (int threadsAmount = 1; threadsAmount <= 4; threadsAmount *= 2) {
-			List<int> list;
-			int count = 0;
-			int numberOfElements = 1000000;
+	SECTION("MULTIPLE ACCESS ERASE TEST") {
+		std::cout << std::endl;
+		std::cout << "MULTIPLE ACCESS ERASE TEST" << std::endl;
 
-			std::vector<std::thread> threads;
+		std::cout << "NUMBER OF ELEMENTS / NUMBER OF THREADS / TIME" << std::endl;
 
-			auto startThreaded = std::chrono::high_resolution_clock::now();
+		for (int numberOfElements = 10000; numberOfElements <= 1000000; numberOfElements *= 10) {
+			for (int threadsAmount = 1; threadsAmount <= 4; threadsAmount *= 2) {
+				List<int> list;
+				int count = 0;
+				std::vector<std::thread> threads;
 
-			for (int i = 0; i < threadsAmount; ++i) {
-				threads.push_back(std::thread([&](int th) {
-					for (int j = 0; j < numberOfElements / threadsAmount; ++j) {
-						list.push_back(j + th * numberOfElements / threadsAmount);
-					}
-					}, i));
+				auto startThreaded = std::chrono::high_resolution_clock::now();
+
+				for (int i = 0; i < threadsAmount; ++i) {
+					threads.push_back(std::thread([&](int th) {
+						for (int j = 0; j < numberOfElements / threadsAmount; ++j) {
+							list.push_back(j + th * numberOfElements / threadsAmount);
+						}
+						}, i));
+				}
+
+				for (int k = 0; k < threadsAmount; ++k) {
+					threads[k].join();
+				}
+
+				REQUIRE(list.size() == numberOfElements);
+
+				threads.clear();
+				int numberOfDeletions = numberOfElements / 2;
+
+				for (int i = 0; i < threadsAmount; ++i) {
+					threads.push_back(std::thread([&](int th) {
+						for (int j = 0; j < numberOfDeletions / threadsAmount; ++j) {
+							auto it = list.begin();
+							list.erase(it);
+						}
+						}, i));
+				}
+
+				for (int k = 0; k < threadsAmount; ++k) {
+					threads[k].join();
+				}
+
+				REQUIRE(list.size() >= static_cast<size_t>(numberOfElements - numberOfDeletions));
+
+				auto endThreaded = std::chrono::high_resolution_clock::now();
+				auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
+
+				std::cout << numberOfElements << "        " << threadsAmount << "        " << static_cast<double>(timeThreaded.count()) / 1000.0 << std::endl;
 			}
-
-			for (int k = 0; k < threadsAmount; ++k) {
-				threads[k].join();
-			}
-
-			REQUIRE(list.size() == numberOfElements);
-
-			threads.clear();
-			int numberOfDeletions = numberOfElements / 2;
-
-			for (int i = 0; i < threadsAmount; ++i) {
-				threads.push_back(std::thread([&](int th) {
-					for (int j = 0; j < numberOfDeletions / threadsAmount; ++j) {
-						auto it = list.begin();
-						list.erase(it);
-					}
-					}, i));
-			}
-
-			for (int k = 0; k < threadsAmount; ++k) {
-				threads[k].join();
-			}
-
-			REQUIRE(list.size() >= static_cast<size_t>(numberOfElements - numberOfDeletions));
-
-			auto endThreaded = std::chrono::high_resolution_clock::now();
-			auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
-
-			std::cout << "NUMBER OF THREADS = " << threadsAmount << std::endl;
-			std::cout << "TIME = " << (double)timeThreaded.count() / 1000.0 << std::endl;
 		}
 	}
 
 	SECTION("ITERATION/ERASE TEST") {
+		std::cout << std::endl;
 		std::cout << "ITERATION/ERASE TEST" << std::endl;
 		srand(time(nullptr));
 		List<int> list;
 		int count = 0;
 		int threadsAmount = 4;
-		int numberOfElements = 100000;
+		int numberOfElements = 1000000;
 
 		std::vector<std::thread> threads;
 
@@ -280,23 +311,26 @@ TEST_CASE("TEST") {
 
 		std::condition_variable cv;
 
-
 		int numberOfDeletions = numberOfElements / 2;
 
 		for (int i = 0; i < threadsAmount / 2; ++i) {
 			threads.push_back(std::thread([&](int th) {
-				std::mutex mutex_;
-				std::unique_lock<std::mutex> lck(mutex_);
-				cv.wait(lck);
+				{
+					std::mutex mutex_;
+					std::unique_lock<std::mutex> cvlock(mutex_);
+					cv.wait(cvlock);
+				}
 				for (int j = 0; j < numberOfDeletions / threadsAmount / 2; ++j) {
 					auto it = list.begin();
 					list.erase(it);
 				}
 				}, i));
 			threads.push_back(std::thread([&](int th) {
-				std::mutex mutex_;
-				std::unique_lock<std::mutex> lck(mutex_);
-				cv.wait(lck);
+				{
+					std::mutex mutex_;
+					std::unique_lock<std::mutex> cvlock(mutex_);
+					cv.wait(cvlock);
+				}
 				auto it = list.begin();
 				int numberOfIterations = rand() % numberOfElements;
 				for (int j = 0; j < numberOfIterations; ++j) {
@@ -312,6 +346,74 @@ TEST_CASE("TEST") {
 			threads[k].join();
 		}
 
+		auto endThreaded = std::chrono::high_resolution_clock::now();
+		auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
+
+		std::cout << "NUMBER OF THREADS = " << threadsAmount << std::endl;
+		std::cout << "TIME = " << static_cast<double>(timeThreaded.count()) / 1000.0 << std::endl;
 		REQUIRE(list.size() >= static_cast<size_t>(numberOfElements - numberOfDeletions));
+	}
+
+	SECTION("SPEED TEST") {
+		std::cout << std::endl;
+		std::cout << "SPEED TEST" << std::endl;
+
+		std::cout << "NUMBER OF ELEMENTS / NUMBER OF THREADS / TIME" << std::endl;
+		for (int numberOfElements = 10000; numberOfElements <= 1000000; numberOfElements *= 10) {
+			for (int threadsAmount = 1; threadsAmount <= 4; threadsAmount *= 2) {
+				List<int> list;
+				int count = 0;
+
+				std::vector<std::thread> threads;
+
+				for (int i = 0; i < threadsAmount; ++i) {
+					threads.push_back(std::thread([&](int th) {
+						for (int j = 0; j < numberOfElements / threadsAmount; ++j) {
+							list.push_back(j + th * numberOfElements / threadsAmount);
+						}
+						}, i));
+				}
+
+				for (int k = 0; k < threadsAmount; ++k) {
+					threads[k].join();
+				}
+
+				REQUIRE(list.size() == numberOfElements);
+
+				std::condition_variable cv;
+
+				threads.clear();
+				int numberOfIterations = (numberOfElements / 2) / threadsAmount;
+				auto startThreaded = std::chrono::high_resolution_clock::now();
+
+				for (int i = 0; i < threadsAmount; ++i) {
+					threads.push_back(std::thread([&](int th) {
+						auto it = list.begin();
+						for (int j = 0; j < numberOfIterations; ++j) {
+							++it;
+						}
+						std::mutex mutex_;
+						std::unique_lock<std::mutex> lck(mutex_);
+						cv.wait(lck);
+						for (int j = 0; j < numberOfIterations; ++j) {
+							list.erase(it);
+							++it;
+						}
+						}, i));
+				}
+
+				std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+				cv.notify_all();
+
+				for (int k = 0; k < threadsAmount; ++k) {
+					threads[k].join();
+				}
+
+				auto endThreaded = std::chrono::high_resolution_clock::now();
+				auto timeThreaded = std::chrono::duration_cast<std::chrono::milliseconds>(endThreaded - startThreaded);
+
+				std::cout << numberOfElements << "        " << threadsAmount << "        " << static_cast<double>(timeThreaded.count()) / 1000.0 - 1.0 << std::endl;
+			}
+		}
 	}
 }
